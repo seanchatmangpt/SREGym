@@ -176,6 +176,32 @@ def _make_kubectl_tool(conductor: Conductor, stage_getter):
     return run_kubectl
 
 
+_TOOL_CHOICE_RETRY_ATTEMPTS = 4
+_TOOL_CHOICE_RETRY_BASE_DELAY_S = 2.0
+
+
+def _is_groq_tool_choice_none_error(exc: Exception) -> bool:
+    """True for the real, observed litellm/Groq incompatibility where Groq
+    rejects a completion outright because the model emitted a tool call while
+    the request's tool_choice was "none" -- e.g.:
+
+        litellm.BadRequestError: GroqException - {"error":{"message":
+        "Tool choice is none, but model called a tool", ...}}
+
+    Confirmed live this session against groq/openai/gpt-oss-20b: dspy.ReAct's
+    internal `self.react = dspy.Predict(react_signature)` step (NOT dspy's
+    own extract/finish step) hit this on a real, otherwise-healthy trajectory
+    (two prior real tool calls had already succeeded) -- a real, intermittent
+    dspy/litellm/Groq compatibility gap, not a bug in this test's own logic,
+    and not something retrying blindly forever is the right response to
+    either: retried a bounded number of times with backoff, then a real,
+    named failure propagates rather than looping forever or fabricating
+    success.
+    """
+    message = str(exc)
+    return "Tool choice is none" in message and "called a tool" in message
+
+
 def _run_react_stage(kubectl_tool, stage_name: str, task_description: str) -> str:
     """Run a real dspy.ReAct loop for one stage and return its free-text answer."""
     import dspy
@@ -196,12 +222,31 @@ def _run_react_stage(kubectl_tool, stage_name: str, task_description: str) -> st
         task: str = dspy.InputField()
         report: str = dspy.OutputField(desc="Free-text summary of findings/actions taken.")
 
-    agent = dspy.ReAct(StageSignature, tools=[kubectl_tool], max_iters=MAX_REACT_ITERS)
+    last_exc: Exception | None = None
+    for attempt in range(_TOOL_CHOICE_RETRY_ATTEMPTS):
+        agent = dspy.ReAct(StageSignature, tools=[kubectl_tool], max_iters=MAX_REACT_ITERS)
+        try:
+            with dspy.context(lm=lm):
+                prediction = agent(task=task_description)
+            return getattr(prediction, "report", str(prediction))
+        except Exception as exc:  # noqa: BLE001 -- real, narrow re-raise below, not a blanket swallow
+            if not _is_groq_tool_choice_none_error(exc):
+                raise
+            last_exc = exc
+            delay = _TOOL_CHOICE_RETRY_BASE_DELAY_S * (2**attempt)
+            logger.warning(
+                "stage %r: real Groq tool_choice=none/model-called-a-tool incompatibility "
+                "(attempt %d/%d) -- retrying a fresh ReAct trajectory in %.1fs: %s",
+                stage_name,
+                attempt + 1,
+                _TOOL_CHOICE_RETRY_ATTEMPTS,
+                delay,
+                exc,
+            )
+            time.sleep(delay)
 
-    with dspy.context(lm=lm):
-        prediction = agent(task=task_description)
-
-    return getattr(prediction, "report", str(prediction))
+    assert last_exc is not None
+    raise last_exc
 
 
 async def _poll_until(conductor: Conductor, target_stage_not: str, timeout_s: int, interval_s: int) -> None:
