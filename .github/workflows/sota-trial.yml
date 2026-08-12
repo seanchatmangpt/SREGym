@@ -1,0 +1,126 @@
+name: SOTA Agent Trial
+
+on:
+  workflow_dispatch:
+    inputs:
+      problem_id:
+        description: 'Single problem ID to run (used when problem_ids_csv is empty)'
+        required: false
+        default: 'misconfig_app_hotel_res'
+        type: string
+      problem_ids_csv:
+        description: 'Comma-separated problem IDs to run as a matrix (overrides problem_id when set)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  build-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      problem_ids: ${{ steps.set-matrix.outputs.problem_ids }}
+    steps:
+      - name: Build matrix from inputs
+        id: set-matrix
+        run: |
+          CSV="${{ github.event.inputs.problem_ids_csv }}"
+          if [ -n "$CSV" ]; then
+            # Split on commas, trim whitespace, build a JSON array.
+            IDS=$(echo "$CSV" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | jq -R . | jq -sc .)
+          else
+            IDS=$(jq -nc --arg id "${{ github.event.inputs.problem_id }}" '[$id]')
+          fi
+          echo "problem_ids=$IDS" >> "$GITHUB_OUTPUT"
+
+  sota-trial:
+    needs: build-matrix
+    # Free, unlimited-minutes runner for public repos. Do not "upgrade" this to a
+    # larger/paid runner (e.g. ubuntu-latest-4-cores) without accounting for the
+    # cost implications -- this job intentionally mirrors smoke-test.yml's choice.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        problem_id: ${{ fromJson(needs.build-matrix.outputs.problem_ids) }}
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # ── Cluster tooling ───────────────────────────────────────────────
+      - name: Install Kind
+        run: |
+          curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+          chmod +x /tmp/kind
+          sudo mv /tmp/kind /usr/local/bin/kind
+          kind version
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Pre-pull kind node image
+        run: docker pull jacksonarthurclark/aiopslab-kind-x86:latest
+
+      - name: Prepare /run/udev for OpenEBS NDM
+        run: sudo mkdir -p /run/udev
+
+      - name: Create kind cluster with Calico
+        run: bash kind/setup_kind_cluster.sh x86
+
+      # ── Python environment ────────────────────────────────────────────
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync
+
+      # ── Run SOTA trial ───────────────────────────────────────────────
+      - name: Run SOTA trial
+        env:
+          PROBLEM_ID: ${{ matrix.problem_id }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          SOTA_TRIAL_RESULTS_PATH: sota_trial_results.json
+        run: uv run pytest tests/integration/test_sota_trial.py -v -s -m integration
+
+      # ── Upload real trial results as a CI artifact ───────────────────
+      - name: Upload SOTA trial results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sota-trial-results-${{ matrix.problem_id }}
+          path: sota_trial_results.json
+          if-no-files-found: warn
+
+      # ── Diagnostics on failure ────────────────────────────────────────
+      - name: Dump cluster diagnostics
+        if: failure()
+        run: |
+          echo "=== Cluster Info ==="
+          kubectl cluster-info || true
+          echo "=== All Pods (all namespaces) ==="
+          kubectl get pods -A -o wide || true
+          echo "=== Pod Descriptions (non-Running) ==="
+          kubectl get pods -A --no-headers | grep -v Running | awk '{print $1, $2}' | \
+            while read ns pod; do
+              echo "--- $ns/$pod ---"
+              kubectl describe pod "$pod" -n "$ns" 2>/dev/null | tail -30
+            done || true
+          echo "=== Recent Events ==="
+          kubectl get events -A --sort-by='.lastTimestamp' | tail -50 || true
+
+      - name: Export kind logs
+        if: failure()
+        run: kind export logs /tmp/kind-logs || true
+
+      - name: Upload kind logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kind-logs-${{ matrix.problem_id }}
+          path: /tmp/kind-logs/
+          if-no-files-found: ignore

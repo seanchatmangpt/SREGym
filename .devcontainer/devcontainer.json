@@ -1,0 +1,94 @@
+{
+  "name": "SREGym (kind + Calico, hardened)",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "..",
+    "args": {
+      "TARGETARCH_HINT": "auto"
+    }
+  },
+
+  // Docker-in-docker via the pinned devcontainers feature — a real, isolated
+  // daemon inside the container, not a bind-mounted host socket
+  // (Docker-outside-of-Docker / -v /var/run/docker.sock). This also means no
+  // Colima is anywhere in this path: the Codespace VM is a fresh real Linux
+  // host running its own dockerd, so failure modes (1) "colima resets
+  // kubectl context" and (2) "stale/wrongly-shaped kind cluster left over
+  // from a previous colima VM" are structurally absent, not merely avoided.
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2.12.2": {
+      "moby": true,
+      "dockerDashComposeVersion": "v2",
+      // userns remap gives the daemon's containers (and therefore the kind
+      // nodes) real, non-root UID/GID mapping instead of --privileged root
+      // equivalence with the host.
+      "installDockerBuildx": true
+    },
+    "ghcr.io/devcontainers/features/common-utils:2.5.3": {
+      "installZsh": false,
+      "configureZshAsDefaultShell": false,
+      "username": "vscode",
+      "userUid": "1000",
+      "userGid": "1000",
+      "upgradePackages": true
+    }
+  },
+
+  // Real 4-node kind cluster (1 control-plane + 3 workers) + Calico + a full
+  // SRE app stack (Prometheus, Jaeger, Loki, OpenEBS, Khaos, the problem app
+  // itself) concurrently on one Docker daemon. kind's own docs recommend
+  // 4 CPU / 8GB as a floor for a single-node cluster; this is a 4-node
+  // cluster plus the CI runner class this repo's own smoke-test.yml relies
+  // on (GitHub-hosted ubuntu-latest: 4 vCPU / 16GB — see .devcontainer/README.md
+  // for the exact accounting). 8 cores / 32GB storage keeps image pulls,
+  // pre-baked layers, and the running stack off the edge of that floor.
+  "hostRequirements": {
+    "cpus": 8,
+    "memory": "16gb",
+    "storage": "64gb"
+  },
+
+  "remoteUser": "vscode",
+  "containerUser": "vscode",
+  "updateRemoteUserUID": true,
+
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind,consistency=cached",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+
+  // Secrets are sourced only from the environment the Codespaces host
+  // injects (Codespaces user/org/repo secrets surface as env vars in the
+  // container's process environment automatically). containerEnv here only
+  // *references* those host-injected vars — it never assigns a literal
+  // value, and nothing here is baked into the image or committed to the repo.
+  "containerEnv": {
+    "GROQ_API_KEY": "${localEnv:GROQ_API_KEY}",
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
+    "AGENT_API_KEY": "${localEnv:AGENT_API_KEY}",
+    "WAIT_FOR_POD_READY_TIMEOUT": "1800",
+    "CALICO_TIMEOUT": "300s"
+  },
+
+  "postCreateCommand": "bash .devcontainer/postCreate.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-azuretools.vscode-docker",
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/workspaces/SREGym/.venv/bin/python"
+      }
+    }
+  },
+
+  "forwardPorts": [9954],
+  "portsAttributes": {
+    "9954": {
+      "label": "kubectl-mcp",
+      "onAutoForward": "notify"
+    }
+  }
+}
