@@ -202,16 +202,12 @@ def _is_groq_tool_choice_none_error(exc: Exception) -> bool:
     return "Tool choice is none" in message and "called a tool" in message
 
 
+_TOOL_CHOICE_RETRY_TEMPERATURES = (0.0, 0.3, 0.5, 0.7)
+
+
 def _run_react_stage(kubectl_tool, stage_name: str, task_description: str) -> str:
     """Run a real dspy.ReAct loop for one stage and return its free-text answer."""
     import dspy
-
-    lm = dspy.LM(
-        "groq/openai/gpt-oss-20b",
-        api_key=os.environ["GROQ_API_KEY"],
-        temperature=0.0,
-        max_tokens=4000,
-    )
 
     class StageSignature(dspy.Signature):
         """Investigate a live Kubernetes cluster using the run_kubectl tool and
@@ -224,6 +220,19 @@ def _run_react_stage(kubectl_tool, stage_name: str, task_description: str) -> st
 
     last_exc: Exception | None = None
     for attempt in range(_TOOL_CHOICE_RETRY_ATTEMPTS):
+        # Confirmed live this session: at temperature=0.0, a failed attempt's
+        # exact broken tool-call generation reproduces byte-for-byte on a
+        # fresh trajectory retry (deterministic decoding -- same prompt, same
+        # output), so retrying at the same temperature is a genuine no-op,
+        # not a real second chance. Perturbing temperature on each retry is
+        # what actually gives the model a different completion to try.
+        temperature = _TOOL_CHOICE_RETRY_TEMPERATURES[min(attempt, len(_TOOL_CHOICE_RETRY_TEMPERATURES) - 1)]
+        lm = dspy.LM(
+            "groq/openai/gpt-oss-20b",
+            api_key=os.environ["GROQ_API_KEY"],
+            temperature=temperature,
+            max_tokens=4000,
+        )
         agent = dspy.ReAct(StageSignature, tools=[kubectl_tool], max_iters=MAX_REACT_ITERS)
         try:
             with dspy.context(lm=lm):
@@ -236,10 +245,12 @@ def _run_react_stage(kubectl_tool, stage_name: str, task_description: str) -> st
             delay = _TOOL_CHOICE_RETRY_BASE_DELAY_S * (2**attempt)
             logger.warning(
                 "stage %r: real Groq tool_choice=none/model-called-a-tool incompatibility "
-                "(attempt %d/%d) -- retrying a fresh ReAct trajectory in %.1fs: %s",
+                "(attempt %d/%d, temperature=%.1f) -- retrying a fresh ReAct trajectory at a "
+                "different temperature in %.1fs: %s",
                 stage_name,
                 attempt + 1,
                 _TOOL_CHOICE_RETRY_ATTEMPTS,
+                temperature,
                 delay,
                 exc,
             )
