@@ -1,0 +1,48 @@
+name: ggen projection
+
+on:
+  pull_request:
+    paths:
+      - "ggen.toml"
+      - "ggen/**"
+      - "sregym/conductor/problem_sets.py"
+      - "sregym/conductor/generated_problem_sets.py"
+      - "scripts/verify_ggen_projection.py"
+      - "tests/test_ggen_projection.py"
+      - ".github/workflows/ggen-projection.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout SREGym fork
+        uses: actions/checkout@v4
+
+      - name: Checkout admitted ggen source
+        uses: actions/checkout@v4
+        with:
+          repository: seanchatmangpt/ggen
+          ref: 41cd378c6f55de6ed3991fdba60a7c25b68546b9
+          path: .ggen-toolchain
+
+      - name: Install ggen pinned Rust toolchain
+        run: rustup toolchain install nightly-2026-06-22 --profile minimal
+
+      - name: Regenerate through ggen
+        run: >-
+          cargo +nightly-2026-06-22 run
+          --manifest-path .ggen-toolchain/Cargo.toml
+          -p ggen-cli-lib --bin ggen -- sync run
+
+      - name: Verify projection contract
+        run: python scripts/verify_ggen_projection.py
+
+      - name: Refuse generated drift
+        run: git diff --exit-code -- sregym/conductor/generated_problem_sets.py
+
+      - name: Run focused tests
+        run: python -m unittest -q tests/test_ggen_projection.py
