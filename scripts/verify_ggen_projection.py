@@ -99,8 +99,9 @@ def main() -> None:
     if "from sregym.conductor.generated_problem_sets import SREGYM_LITE_PROBLEMS" not in problem_sets_text:
         fail("runtime problem_sets.py is not wired to the generated projection")
 
+    status = "ALIVE" if registry_checked else "PARTIAL_ALIVE"
     registry_note = " + native registry closure" if registry_checked else " (registry source not materialized)"
-    print(f"PARTIAL_ALIVE ggen projection structure: {len(rows)} admitted SREGym-Lite problems{registry_note}")
+    print(f"{status} ggen projection structure: {len(rows)} admitted SREGym-Lite problems{registry_note}")
 
 
 if __name__ == "__main__":
