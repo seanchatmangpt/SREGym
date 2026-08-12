@@ -33,7 +33,7 @@ PROBLEM_METADATA = {
     },
     "edge_request_filter_cpu_saturation": {
         "ontology_id": "edge-request-filter-cpu-saturation",
-        "application": "cluster",
+        "application": "astronomy_shop",
         "fault_layer": "application",
         "fault_family": "cpu-saturation",
     },
@@ -87,7 +87,7 @@ PROBLEM_METADATA = {
     },
     "namespace_memory_limit": {
         "ontology_id": "namespace-memory-limit",
-        "application": "cluster",
+        "application": "hotel_reservation",
         "fault_layer": "kubernetes",
         "fault_family": "resource-governance",
     },
