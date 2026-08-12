@@ -15,9 +15,20 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ggen-projection-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GGEN_SOURCE_SHA: 41cd378c6f55de6ed3991fdba60a7c25b68546b9
+  GGEN_RELEASE_TAG: v26.8.11
+  GGEN_RELEASE_SHA: 402cecdff8784767eb9f26e235d87c759610c066
+  GGEN_LINUX_SHA256: 790f8eab8b038e746af45cf70adde47c0df65fbcc5514c2c6ac8e5f80b2fe792
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout SREGym fork
         uses: actions/checkout@v4
@@ -26,17 +37,46 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: seanchatmangpt/ggen
-          ref: 41cd378c6f55de6ed3991fdba60a7c25b68546b9
+          ref: ${{ env.GGEN_SOURCE_SHA }}
           path: .ggen-toolchain
+          fetch-depth: 0
 
-      - name: Install ggen pinned Rust toolchain
-        run: rustup toolchain install nightly-2026-06-22 --profile minimal
+      - name: Admit release binary equivalence
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="$({
+            git -C .ggen-toolchain diff --name-only \
+              "${GGEN_RELEASE_SHA}..${GGEN_SOURCE_SHA}" -- \
+              Cargo.toml Cargo.lock \
+              ':(glob)crates/**/Cargo.toml' \
+              ':(glob)crates/**/src/**'
+          } || true)"
+          if [ -n "$changed" ]; then
+            echo "REFUSED_GGEN_BINARY_EQUIVALENCE: production generator source changed after ${GGEN_RELEASE_SHA}"
+            printf '%s\n' "$changed"
+            exit 1
+          fi
+          echo "ALIVE release equivalence: no production crate source/manifests changed between ${GGEN_RELEASE_SHA} and ${GGEN_SOURCE_SHA}"
+
+      - name: Install receipted ggen release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=/tmp/ggen-x86_64-unknown-linux-gnu.tar.gz
+          install_dir=/tmp/ggen-release
+          curl -fsSL \
+            "https://github.com/seanchatmangpt/ggen/releases/download/${GGEN_RELEASE_TAG}/ggen-x86_64-unknown-linux-gnu.tar.gz" \
+            -o "$archive"
+          echo "${GGEN_LINUX_SHA256}  ${archive}" | sha256sum -c -
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir"
+          chmod +x "$install_dir/ggen"
+          "$install_dir/ggen" --version
+          echo "$install_dir" >> "$GITHUB_PATH"
 
       - name: Regenerate through ggen
-        run: >-
-          cargo +nightly-2026-06-22 run
-          --manifest-path .ggen-toolchain/Cargo.toml
-          -p ggen-cli-lib --bin ggen -- sync run
+        run: ggen sync run
 
       - name: Verify projection contract
         run: python scripts/verify_ggen_projection.py
