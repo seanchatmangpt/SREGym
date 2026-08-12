@@ -20,7 +20,17 @@ The ontology records each benchmark problem's stable runtime ID plus application
 
 ## Regenerate
 
-With `seanchatmangpt/ggen` checked out adjacent to this repository at commit `41cd378c6f55de6ed3991fdba60a7c25b68546b9`:
+With ggen `v26.8.11` on `PATH`:
+
+```bash
+ggen sync run
+python scripts/verify_ggen_projection.py
+python -m unittest -q tests/test_ggen_projection.py
+```
+
+CI pins the Linux `v26.8.11` release archive by SHA-256 and resolves the tag to `402cecdff8784767eb9f26e235d87c759610c066`. It also checks the admitted newer ggen source commit `41cd378c6f55de6ed3991fdba60a7c25b68546b9` and refuses use of the release binary if any production crate source or Cargo manifest changed between those commits. This preserves toolchain identity while avoiding a source rebuild when the intervening changes are outside the generator runtime.
+
+For direct source replay against the admitted newer source commit, with `seanchatmangpt/ggen` checked out adjacent to this repository:
 
 ```bash
 cargo +nightly-2026-06-22 run \
@@ -30,7 +40,7 @@ python scripts/verify_ggen_projection.py
 python -m unittest -q tests/test_ggen_projection.py
 ```
 
-A successful `ggen sync run` also emits ggen's generation receipt. CI repeats the same generation from the pinned ggen commit and refuses if the checked-in projection drifts.
+A successful `ggen sync run` emits ggen's generation receipt. CI then refuses both projection-contract violations and any checked-in generated drift.
 
 ## Extension rule
 
