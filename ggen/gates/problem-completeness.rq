@@ -1,0 +1,17 @@
+# Admission gate: every benchmark problem must be executable and classifiable.
+# ASK=true means a violation exists and generation must be refused.
+PREFIX sre: <https://seanchatmangpt.github.io/SREGym/ontology#>
+PREFIX dcterms: <http://purl.org/dc/terms/>
+
+ASK {
+  ?problem a sre:BenchmarkProblem .
+  FILTER (
+    NOT EXISTS { ?problem dcterms:identifier ?id } ||
+    NOT EXISTS { ?problem sre:runtimeProblemId ?runtimeId } ||
+    NOT EXISTS { ?problem sre:order ?order } ||
+    NOT EXISTS { ?problem sre:application ?application } ||
+    NOT EXISTS { ?problem sre:faultLayer ?layer } ||
+    NOT EXISTS { ?problem sre:faultFamily ?family } ||
+    NOT EXISTS { ?problem dcterms:isPartOf ?suite }
+  )
+}
