@@ -1,0 +1,41 @@
+[project]
+name = "sregym-ggen-wrapper"
+version = "0.1.0"
+description = "Deterministic benchmark-suite projections for SREGym"
+license = "MIT"
+
+[ontology]
+source = "ggen/sregym.ttl"
+base_iri = "https://seanchatmangpt.github.io/SREGym/ontology#"
+imports = ["ggen/sregym.ttl"]
+
+[ontology.prefixes]
+sre = "https://seanchatmangpt.github.io/SREGym/ontology#"
+dcterms = "http://purl.org/dc/terms/"
+skos = "http://www.w3.org/2004/02/skos/core#"
+dcat = "http://www.w3.org/ns/dcat#"
+xsd = "http://www.w3.org/2001/XMLSchema#"
+
+[validation]
+gates = ["ggen/gates/problem-completeness.rq"]
+
+[generation]
+output_dir = "."
+
+[[generation.rules]]
+name = "sregym-problem-sets"
+query = { inline = """
+PREFIX sre: <https://seanchatmangpt.github.io/SREGym/ontology#>
+PREFIX dcterms: <http://purl.org/dc/terms/>
+SELECT ?id WHERE {
+  ?problem a sre:BenchmarkProblem ;
+           dcterms:identifier ?id ;
+           dcterms:isPartOf sre:sregym-lite .
+}
+ORDER BY ?id
+LIMIT 1
+""" }
+template = { file = "ggen/templates/generated_problem_sets.py.tera" }
+output_file = "sregym/conductor/generated_problem_sets.py"
+skip_empty = false
+mode = "Overwrite"
