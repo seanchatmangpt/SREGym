@@ -1,0 +1,15 @@
+{
+  "schema": "ggen.forced-top25-qualification-consumer/v1",
+  "consumer_repo": "seanchatmangpt/SREGym",
+  "consumer_base": "4f6757c758521a359f1091d17d37ae5a9b1fb962",
+  "consumer_family": "sre-benchmark-ggen",
+  "consumer_ggen_contract": "OBSERVED",
+  "producer_repo": "seanchatmangpt/ggen-marketplace",
+  "producer_head": "18a88bddb5ed39c8fec8685adfdabfb9952cb564",
+  "producer_pack": "forced-top25-qualification-capsule-pack",
+  "producer_capability": "R86_FORCED_TOP25_QUALIFICATION_CAPSULE",
+  "prior_capability": "R85_TCPS_READY_SET_CONSUMER",
+  "authority": "VERIFY|CONSTRUCT",
+  "consequential_do": false,
+  "standing": "ADMITTED"
+}
