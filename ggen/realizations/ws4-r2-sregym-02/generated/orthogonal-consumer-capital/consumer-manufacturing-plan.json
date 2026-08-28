@@ -1,0 +1,8 @@
+{
+  "schema": "ggen.orthogonal-consumer-capital/1",
+  "authority": "SELECT|CONSTRUCT|VERIFY",
+  "consequential_do": false,
+  "targets": [
+  {"repository":"seanchatmangpt/SREGym","expected_yield":1402,"dependency_unlocks":2402,"composition_unlocks":3402,"future_capacity":4402}
+  ]
+}
